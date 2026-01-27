@@ -1,0 +1,37 @@
+# OS & Editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+debug.log
+
+# Node / JS artifacts
+node_modules/
+dist/
+build/
+coverage/
+.nyc_output/
+
+# Docker & runtime
+.docker/
+docker-data/
+tmp/
+*.pid
+
+# n8n local data (if present)
+.n8n/
+.n8n-local-files/
+
+# Project outputs (not tracked)
+Sample outputs/
+Workflow/Video/
