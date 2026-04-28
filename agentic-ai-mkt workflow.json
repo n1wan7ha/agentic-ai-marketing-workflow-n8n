@@ -1,0 +1,1222 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Lead Gen Setup",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Client Description",
+              "fieldType": "textarea",
+              "fieldName": "client_description",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Target Industry",
+              "fieldName": "target_industry",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Target Country",
+              "fieldName": "target_country"
+            },
+            {
+              "fieldLabel": "Target City",
+              "fieldName": "target_city"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -672,
+        0
+      ],
+      "id": "f7067bdf-5da9-43c9-baa5-f789630d543b",
+      "name": "On form submission",
+      "webhookId": "REDACTED"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "58da2f0c-31a7-4eee-9235-284c51aef4a7",
+              "name": "clientDescription",
+              "value": "={{ $json.client_description }}",
+              "type": "string"
+            },
+            {
+              "id": "a5d30f7c-ddf2-4aa2-8762-3ade50be2ebc",
+              "name": "targetIndustry",
+              "value": "={{ $json.target_industry }}",
+              "type": "string"
+            },
+            {
+              "id": "55c1f8e3-7c24-480b-9017-de3a3d3daf0a",
+              "name": "targetCountry",
+              "value": "={{ $json.target_country }}",
+              "type": "string"
+            },
+            {
+              "id": "87848e4a-3afc-405f-8fd2-9c8241271f8b",
+              "name": "targetCity",
+              "value": "={{ $json.target_city }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        -80
+      ],
+      "id": "80045858-e67c-47ac-9a3d-ace4f2b386b8",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -672,
+        -176
+      ],
+      "id": "62095dd4-6b48-4496-b2dd-2ec1c7eb8c60",
+      "name": "When clicking ‘Execute workflow’",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-KEY",
+              "value": "={{ $env.SERPER_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=site:linkedin.com/company/ \"{{$json.targetIndustry}}\" \"{{$json.targetCity}}\" \"{{$json.targetCountry}}\""
+            },
+            {
+              "name": "num",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -192,
+        -80
+      ],
+      "id": "9ffe8907-f191-4413-8b81-fb9c03f4d93e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the Search Results\nconst searchResults = $input.first().json;\n\n// 2. CRITICAL FIX: Get the original Inputs (Industry, City) from the first node\n// We use $('Edit Fields') to bypass the HTTP node and get your starting data\nconst globalInputs = $('Edit Fields').first().json;\n\n// Debug Log\nconsole.log(\"Processing results for:\", globalInputs.targetCity);\n\n// Handle empty results\nif (!searchResults.organic || searchResults.organic.length === 0) {\n  return [{\n    error: \"No companies found\",\n    timestamp: new Date().toISOString()\n  }];\n}\n\nconst companies = searchResults.organic.map((item, index) => {\n  // --- LinkedIn Logic (Same as before) ---\n  const linkedinUrl = item.link || \"\";\n  let companyName = \"\";\n  let linkedinHandle = \"\";\n  \n  if (linkedinUrl.includes('linkedin.com/company/')) {\n    const urlParts = linkedinUrl.split('/');\n    const handleIndex = urlParts.findIndex(part => part === 'company') + 1;\n    if (handleIndex < urlParts.length) {\n      linkedinHandle = urlParts[handleIndex];\n      companyName = linkedinHandle\n        .replace(/-/g, ' ').replace(/_/g, ' ')\n        .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');\n    }\n  }\n  \n  if (!companyName || companyName === \"Unknown Company\") {\n    companyName = (item.title || \"\").replace(/\\| LinkedIn| on LinkedIn| - LinkedIn/i, '').trim();\n  }\n  \n  // --- Snippet Parsing (Same as before) ---\n  let website = \"\";\n  const snippet = item.snippet || \"\";\n  const urlRegex = /(https?:\\/\\/[^\\s]+\\.(com|lk|io|org|net|co))[^\\s]*/gi;\n  const urls = snippet.match(urlRegex);\n  if (urls && urls.length > 0) {\n    const validUrl = urls.find(u => !u.includes('linkedin') && !u.includes('facebook') && !u.includes('twitter'));\n    if (validUrl) website = validUrl.replace(/[.,)]+$/, '');\n  }\n  \n  let employeeSize = \"\";\n  const employeeMatch = snippet.match(/(\\d+)\\s*(followers|employees|staff)/i);\n  if (employeeMatch) employeeSize = `${employeeMatch[1]} ${employeeMatch[2].toLowerCase()}`;\n\n  // --- RETURN OBJECT (Now with CORRECT Inputs) ---\n  return {\n    companyName: companyName || `Company ${index + 1}`,\n    linkedinUrl: linkedinUrl,\n    website: website,\n    \n    // NOW THESE WILL WORK:\n    industry: globalInputs.targetIndustry, \n    city: globalInputs.targetCity,\n    country: globalInputs.targetCountry,\n    \n    snippet: snippet,\n    employeeSize: employeeSize,\n    searchPosition: item.position || index + 1,\n    timestamp: new Date().toISOString()\n  };\n});\n\n// Deduplication\nconst uniqueCompanies = [];\nconst seenUrls = new Set();\ncompanies.forEach(company => {\n  if (company.linkedinUrl && !seenUrls.has(company.linkedinUrl)) {\n    seenUrls.add(company.linkedinUrl);\n    uniqueCompanies.push(company);\n  }\n});\n\nreturn uniqueCompanies.length > 0 ? uniqueCompanies : [companies[0]];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        -80
+      ],
+      "id": "56d2dff7-20a6-4cb7-9bbd-16193fbc8c0f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        256,
+        64
+      ],
+      "id": "344bfc6a-ee37-4975-825d-955054c6fed2",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-KEY",
+              "value": "={{ $env.SERPER_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"q\": \"{{ $json.companyName }} official website Sri Lanka contact\",\n  \"num\": 3,\n  \"gl\": \"lk\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        144
+      ],
+      "id": "a1841a0d-3bac-4d89-8247-c48b6bee3d6e",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the search results from the previous node\nconst searchResults = $input.first().json;\n\n// Get the original company data from the Loop node\n// Note: We use $('Loop Over Items') to get the data that started this loop iteration\nconst companyData = $('Loop Over Items').item.json;\n\nlet foundWebsite = \"\";\nlet foundEmail = \"\";\n\n// Helper function to check if a URL is a social media site\nfunction isSocialMedia(url) {\n  const socialDomains = ['linkedin.com', 'facebook.com', 'instagram.com', 'twitter.com', 'youtube.com', 'tiktok.com', 'glassdoor.com'];\n  return socialDomains.some(domain => url.toLowerCase().includes(domain));\n}\n\n// 1. Try to find a valid website in the organic search results\nif (searchResults.organic && searchResults.organic.length > 0) {\n  for (const result of searchResults.organic) {\n    const link = result.link || \"\";\n    // If the link is NOT social media, we assume it's the company site\n    if (link && !isSocialMedia(link)) {\n      foundWebsite = link;\n      break; // Stop after finding the first valid website\n    }\n  }\n}\n\n// 2. Try to find an email in the snippets (simple extraction)\nconst allSnippets = searchResults.organic ? searchResults.organic.map(r => r.snippet).join(\" \") : \"\";\nconst emailMatch = allSnippets.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\.[a-zA-Z0-9._-]+)/gi);\nif (emailMatch && emailMatch.length > 0) {\n  // Filter out junk emails (like example.com or wix.com if needed)\n  foundEmail = emailMatch[0];\n}\n\n// 3. Update the company data with the new findings\n// We prioritize the new website, but fallback to the one from LinkedIn if nothing found\ncompanyData.website = foundWebsite || companyData.website || \"\";\ncompanyData.email = foundEmail || companyData.email || \"\";\ncompanyData.googleSearchSuccess = !!foundWebsite;\n\nreturn companyData;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        144
+      ],
+      "id": "26e70f82-6a47-4661-ad18-c84d1993f088",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "url": "https://api.hunter.io/v2/domain-search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "domain",
+              "value": "={{\n  (() => {\n    // 1. Try to use the website we found\n    if ($json.website && $json.website.includes('://')) {\n      try {\n        // Create a URL object to strip http/https and paths\n        const url = new URL($json.website);\n        return url.hostname.replace('www.', '');\n      } catch (e) {\n        // If URL parsing fails, ignore and move to fallback\n      }\n    }\n\n    // 2. Fallback: Guess the domain from the Company Name\n    // Example: \"Colombo Software\" -> \"colombosoftware.com\"\n    const cleanName = $json.companyName ? $json.companyName.toLowerCase().replace(/[^a-z0-9]/g, '') : \"unknown\";\n    return `${cleanName}.com`;\n  })()\n}}"
+            },
+            {
+              "name": "api_key",
+              "value": "={{ $env.HUNTER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1040,
+        144
+      ],
+      "id": "ccc90255-27d4-454b-af1c-21a26c52c4bb",
+      "name": "HTTP Request2",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the AI Email Draft (from Groq/HTTP Request)\n// Note: Since this node is after Groq, $input.first() contains the AI's email draft.\nconst aiResponse = $input.first().json;\n\n// 2. Get the specific company details from the previous step\n// We look back at 'Code in JavaScript1' because Groq/HTTP Request usually drops the other fields.\nconst companyData = $('Code in JavaScript1').item.json;\n\n// 3. Get the ORIGINAL search inputs from Node 1 (Edit Fields)\n// This ensures we have a fallback for City/Country if the company data is missing it.\nconst searchInputs = $('Edit Fields').first().json;\n\n// --- SMART EXTRACTION LOGIC ---\n\n// A. Phone Number Scanner (New!)\n// Looks for patterns like +94 77... or 011-2... or (011) 2...\nlet phone = companyData.phone || \"\";\nif (!phone && companyData.snippet) {\n   const phoneMatch = companyData.snippet.match(/(?:\\+?\\d{1,3}[-. ]?)?\\(?\\d{2,3}\\)?[-. ]?\\d{3}[-. ]?\\d{4}/);\n   if (phoneMatch) phone = phoneMatch[0];\n}\n\n// B. Improved \"Founded Year\" Scanner\n// Catches: \"Est. 2010\", \"Since 1999\", \"Established 2015\"\nlet founded = companyData.foundedYear || \"\";\nif (!founded && companyData.snippet) {\n   const yearMatch = companyData.snippet.match(/(?:founded|est\\.?|established|since)\\s*[:\\-]?\\s*(\\d{4})/i);\n   if (yearMatch) founded = yearMatch[1];\n}\n\n// C. Improved \"Company Type\" Scanner\n// Catches: Pvt Ltd, Inc, LLC, etc.\nlet type = companyData.companyType || \"\";\nif (!type && companyData.snippet) {\n   const typeMatch = companyData.snippet.match(/\\b(Pvt\\s*Ltd|Ltd|Inc|LLC|Corp|Private\\s*Limited)\\b/i);\n   if (typeMatch) type = typeMatch[0];\n}\n\n// D. Resolve Email\n// We use the email that was already found in previous steps\nlet finalEmail = companyData.email || \"\";\n\n// E. Resolve Website (Smart Inference)\n// If website is missing but we have an email (e.g. name@company.com), use the domain\nlet finalWebsite = companyData.website || \"\";\nif (!finalWebsite && finalEmail.includes('@')) {\n  const domain = finalEmail.split('@')[1];\n  // Filter out generic email providers so we don't accidentally list gmail.com as the website\n  if (domain && !['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'].includes(domain)) {\n    finalWebsite = `www.${domain}`;\n  }\n}\n\n// F. Resolve Location & Industry (Fallback Logic)\n// We use specific company data first. If missing, we use the Global Search Inputs from Node 1.\nconst finalCity = companyData.city || searchInputs.targetCity || searchInputs.city || \"\";\nconst finalCountry = companyData.country || searchInputs.targetCountry || searchInputs.country || \"\";\nconst finalIndustry = companyData.industry || searchInputs.targetIndustry || searchInputs.industry || \"\";\n\n// G. Resolve Employee Size\n// If missing, check the snippet text one last time\nlet finalEmployees = companyData.employeeSize || \"\";\nif (!finalEmployees && companyData.snippet) {\n   const sizeMatch = companyData.snippet.match(/(\\d+[-+]\\d*|\\d+)\\s*(employees|staff|people)/i);\n   if (sizeMatch) finalEmployees = sizeMatch[0];\n}\n\n// --- OUTPUT FINAL CLEAN ROW ---\nreturn {\n  timestamp: new Date().toISOString(),\n  \n  // Core Info\n  companyName: companyData.companyName,\n  industry: finalIndustry,\n  city: finalCity,\n  country: finalCountry,\n  \n  // Contact Info\n  website: finalWebsite,\n  email: finalEmail,\n  phone: phone,                  // <--- New Smart Field\n  linkedinUrl: companyData.linkedinUrl || \"\",\n  \n  // Details\n  employeeSize: finalEmployees,\n  foundedYear: founded,          // <--- Improved Smart Field\n  companyType: type,             // <--- Improved Smart Field\n  snippet: companyData.snippet || \"\",\n  \n  // AI Content (The Email Draft)\n  // Checks if the AI response structure matches Groq's standard output\n  draftEmail: aiResponse.choices ? aiResponse.choices[0].message.content : (aiResponse.content || \"AI generation failed\"),\n  \n  // Status Metadata\n  status: finalEmail ? \"Lead Found\" : \"Company Found (No Email)\",\n  emailFound: finalEmail ? \"YES\" : \"NO\",\n  websiteVerified: finalWebsite ? \"YES\" : \"NO\",\n  hunterCredits: 1,\n  serperCredits: 1\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        144
+      ],
+      "id": "7634a674-ca26-4967-a8ca-51f90952727b",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "list",
+          "cachedResultName": "Fexcon_Leads_Database",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cWW1W06QakVPg3yw81V_bLKjHOiQpY6AprO44LRN2uo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cWW1W06QakVPg3yw81V_bLKjHOiQpY6AprO44LRN2uo/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $('Code in JavaScript2').item.json.timestamp }}",
+            "CompanyName": "={{ $('Code in JavaScript2').item.json.companyName }}",
+            "Industry": "={{ $('Code in JavaScript2').item.json.industry }}",
+            "City": "={{ $('Code in JavaScript2').item.json.city }}",
+            "Country": "={{ $('Code in JavaScript2').item.json.country }}",
+            "Email": "={{ $json.manualEmail || $('Code in JavaScript2').item.json.email }}",
+            "LinkedIn": "={{ $('Code in JavaScript2').item.json.linkedinUrl }}",
+            "Website": "={{ $('Code in JavaScript2').item.json.website }}",
+            "EmailFound": "={{ $json.email ? \"YES\" : \"NO\" }}",
+            "Status": "={{ $('Code in JavaScript2').item.json.status }}",
+            "HunterCreditsUsed": "={{ $('Code in JavaScript2').item.json.hunterCredits }}",
+            "WebsiteVerified": "={{ $('Code in JavaScript2').item.json.websiteVerified }}",
+            "SerperCreditsUsed": "={{ $('Code in JavaScript2').item.json.serperCredits }}",
+            "EmployeeSize": "={{ $('Code in JavaScript2').item.json.employeeSize }}",
+            "CompanyType": "={{ $('Code in JavaScript2').item.json.companyType }}",
+            "Snippet": "={{ $('Code in JavaScript2').item.json.snippet }}",
+            "Founded": "={{ $('Code in JavaScript2').item.json.foundedYear }}",
+            "Draft Email": "={{ $json.choices[0].message.content }}",
+            "Phone Number": "={{ $('Code in JavaScript2').item.json.phone }}",
+            "Social Post": "=",
+            "Hashtags": "="
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CompanyName",
+              "displayName": "CompanyName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "City",
+              "displayName": "City",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Country",
+              "displayName": "Country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "LinkedIn",
+              "displayName": "LinkedIn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "EmployeeSize",
+              "displayName": "EmployeeSize",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Founded",
+              "displayName": "Founded",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CompanyType",
+              "displayName": "CompanyType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Snippet",
+              "displayName": "Snippet",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "EmailFound",
+              "displayName": "EmailFound",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "WebsiteVerified",
+              "displayName": "WebsiteVerified",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "HunterCreditsUsed",
+              "displayName": "HunterCreditsUsed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SerperCreditsUsed",
+              "displayName": "SerperCreditsUsed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Draft Email",
+              "displayName": "Draft Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Phone Number",
+              "displayName": "Phone Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Social Post",
+              "displayName": "Social Post",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Hashtags",
+              "displayName": "Hashtags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1632,
+        272
+      ],
+      "id": "89a45cfe-4023-40fd-b601-4f72c67ec00e",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "grnCNPqghFmtwC2c",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "33742397-754e-4a0f-89d1-4c1e471ac1e4",
+              "leftValue": "={{ $json.website }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        608,
+        -160
+      ],
+      "id": "e4660ad3-30a3-4682-b7a8-8bb5d4190915",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        -144
+      ],
+      "id": "195e5446-3c5d-49d6-95bd-6fa78badb654",
+      "name": "Wait",
+      "webhookId": "REDACTED"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GROQ_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    \"model\": \"llama-3.3-70b-versatile\",\n    \"messages\": [\n      {\n        \"role\": \"user\",\n        \"content\": `Act as a B2B Sales Expert. Write a short, personalized cold email to the company \"${$('Code in JavaScript2').item.json.companyName}\".\n\nContext:\n- Their Industry: ${$('Code in JavaScript2').item.json.industry}\n- What they do: ${$('Code in JavaScript2').item.json.snippet}\n- My Offer: We provide elite DevOps and AI automation services.\n\nRequirements:\n- Subject Line: Catchy.\n- Tone: Professional but friendly.\n- Length: Under 150 words.\n- Sign off as: Niwantha Sithumal`\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1776,
+        -48
+      ],
+      "id": "d4620154-7816-466e-888e-d235c14e3aea",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "resume": "form",
+        "formTitle": "Approve Lead?",
+        "formDescription": "={{\n  (() => {\n    // 1. Get Company Data (Looking back 2 steps to the code node)\n    // We use $('...') to grab data from specific nodes by name\n    const data = $('Code in JavaScript2').item.json;\n    \n    // 2. Get the AI Email Draft (From the node immediately before this one)\n    const aiResponse = $input.first().json; \n    const aiText = aiResponse.choices ? aiResponse.choices[0].message.content : \"No AI text generated\";\n\n    // 3. Create the Review Card\n    return `🚨 REVIEW LEAD: ${data.companyName}\n\n📍 DETAILS:\n• Industry: ${data.industry}\n• Location: ${data.city}, ${data.country}\n• Email: ${data.email || \"❌ Not found\"}\n• Website: ${data.website}\n\n📝 AI EMAIL DRAFT:\n-------------------\n${aiText}\n-------------------\n\nSelect \"Yes\" below to save this lead to Google Sheets.`;\n  })()\n}}",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "approve",
+              "fieldType": "radio",
+              "defaultValue": "=",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Yes - Save to Sheet"
+                  },
+                  {
+                    "option": "No - Discard"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "manualEmail",
+              "placeholder": "e.g. info@company.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1984,
+        -48
+      ],
+      "id": "8b1044df-c16e-45ed-9a9d-8f0d11108147",
+      "name": "Wait1",
+      "webhookId": "REDACTED"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "84dd38c9-3570-4eca-af5a-dc67c3707871",
+              "leftValue": "={{ $json.approve }}",
+              "rightValue": "Yes - Save to Sheet",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2192,
+        -48
+      ],
+      "id": "eef57c17-9b3a-4048-877b-d11fc25f0fde",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Wait1').item.json.manualEmail || $json.Email }}",
+        "subject": "={{ $('HTTP Request3').item.json.choices[0].message.content.match(/Subject: (.*)/) ? $('HTTP Request3').item.json.choices[0].message.content.match(/Subject: (.*)/)[1] : \"Collaboration Opportunity\" }}",
+        "message": "={{\n  (() => {\n    // 1. Get the Raw AI Text\n    const rawText = $('HTTP Request3').item.json.choices[0].message.content;\n\n    // 2. Remove the \"Subject:\" line from the body so it doesn't appear twice\n    const cleanBody = rawText.replace(/Subject:.*\\n/, '').trim();\n\n    // 3. Return the HTML Template\n    return `<div style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px;\">\n      \n      <div style=\"white-space: pre-line; margin-bottom: 20px;\">\n        ${cleanBody}\n      </div>\n\n      <br><br>\n      <div style=\"border-top: 1px solid #eee; padding-top: 15px; font-size: 12px; color: #888;\">\n        <p><em>Sent via Fexcon AI Automation.</em></p>\n      </div>\n\n    </div>`;\n  })()\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        272
+      ],
+      "id": "82ca84ea-3fab-4173-b2c8-a354e47e1fb0",
+      "name": "Send a message",
+      "webhookId": "REDACTED",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4JJE9OzfEC1LvEjW",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.GROQ_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    \"model\": \"llama-3.3-70b-versatile\",\n    \"messages\": [\n      {\n        \"role\": \"user\",\n        \"content\": `Create a professional LinkedIn marketing post about our recent outreach.\n\nDETAILS:\n- Company we contacted: ${$('Code in JavaScript2').item.json.companyName}\n- Their Industry: ${$('Code in JavaScript2').item.json.industry}\n- Location: ${$('Code in JavaScript2').item.json.city}\n- Our Service: Elite DevOps & AI Automation\n\nREQUIREMENTS:\n1. Hook: Start with an interesting fact or question about the ${$('Code in JavaScript2').item.json.industry} industry.\n2. Value: Briefly mention how automation helps companies in ${$('Code in JavaScript2').item.json.city} scale.\n3. Call to Action: Ask a question to encourage comments.\n4. Length: Short (under 100 words).\n5. Hashtags: Include #${$('Code in JavaScript2').item.json.industry.replace(/\\s+/g, '')}Tech and #AIAutomation.\n6. Style: Professional but engaging. No emojis.`\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2048,
+        272
+      ],
+      "id": "9c993cf0-9ca1-4b37-9612-c9c378708602",
+      "name": "HTTP Request4"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the Raw Text from Groq (Fixed for Groq format)\nconst response = $input.first().json;\nconst fullText = response.choices ? response.choices[0].message.content : \"\";\n\n// 2. Get Previous Data (to keep passing it through)\nconst companyData = $('Code in JavaScript2').item.json;\n\nlet socialPost = \"\";\nlet hashtags = [];\n\nif (fullText) {\n  // Split by newlines to separate tags from text\n  const lines = fullText.split('\\n');\n  const postLines = [];\n  \n  lines.forEach(line => {\n    if (line.trim().startsWith('#')) {\n      // Extract hashtags\n      const tags = line.match(/#\\w+/g);\n      if (tags) hashtags.push(...tags);\n    } else if (line.trim()) {\n      // Keep normal text\n      postLines.push(line.trim());\n    }\n  });\n  \n  socialPost = postLines.join('\\n\\n');\n}\n\n// 3. Fallback if AI failed\nif (!socialPost) {\n  socialPost = `Excited to connect with ${companyData.companyName}! We are exploring how AI automation can transform the ${companyData.industry} sector.`;\n}\nif (hashtags.length === 0) {\n  hashtags = ['#AI', '#Automation', '#B2B', '#Growth'];\n}\n\n// 4. Output Combined Data\nreturn {\n  ...companyData, \n  socialMediaPost: socialPost,\n  socialHashtags: hashtags.join(' '),\n  postGeneratedAt: new Date().toISOString(),\n  emailStatus: \"SENT\" \n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        272
+      ],
+      "id": "55d1c314-b1d5-4266-955f-91ceb5b1d574",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "list",
+          "cachedResultName": "Fexcon_Leads_Database",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cWW1W06QakVPg3yw81V_bLKjHOiQpY6AprO44LRN2uo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cWW1W06QakVPg3yw81V_bLKjHOiQpY6AprO44LRN2uo/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Email": "={{ $('Wait1').item.json.manualEmail || $json.Email }}",
+            "Social Post": "={{ $json.socialMediaPost }}",
+            "Hashtags": "={{ $json.socialHashtags }}",
+            "CompanyName": "={{ $('Code in JavaScript2').item.json.companyName }}"
+          },
+          "matchingColumns": [
+            "CompanyName"
+          ],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CompanyName",
+              "displayName": "CompanyName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "City",
+              "displayName": "City",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Country",
+              "displayName": "Country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "LinkedIn",
+              "displayName": "LinkedIn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "EmployeeSize",
+              "displayName": "EmployeeSize",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Founded",
+              "displayName": "Founded",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CompanyType",
+              "displayName": "CompanyType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Snippet",
+              "displayName": "Snippet",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "EmailFound",
+              "displayName": "EmailFound",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "WebsiteVerified",
+              "displayName": "WebsiteVerified",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "HunterCreditsUsed",
+              "displayName": "HunterCreditsUsed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SerperCreditsUsed",
+              "displayName": "SerperCreditsUsed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Draft Email",
+              "displayName": "Draft Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Phone Number",
+              "displayName": "Phone Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Social Post",
+              "displayName": "Social Post",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Hashtags",
+              "displayName": "Hashtags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2464,
+        272
+      ],
+      "id": "80e05185-75b6-4f2c-bf56-dca842bf07a3",
+      "name": "Update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "grnCNPqghFmtwC2c",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "When clicking ‘Execute workflow’": [
+      {
+        "json": {
+          "client_description": "AI-powered marketing automation platform for B2B companies",
+          "target_industry": "Software",
+          "target_country": "Sri Lanka",
+          "target_city": "Colombo"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "3e1b1c13-4758-4ec5-a8f7-4458380292f2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7e7d2b005915d55853146022a02d6cc52eabf8b0bea88e1b16a33e1ab7e5a537"
+  },
+  "id": "_p1z4zZ_DsyBByP0vqHMw",
+  "tags": []
+}
